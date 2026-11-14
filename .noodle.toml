@@ -12,7 +12,7 @@ provider = "claude"
 model = "claude-sonnet-5-5"
 
 [routing.roles]
-scheduler = { provider = "claude", model = "claude-sonnet-5-5" }
+scheduler = { provider = "claude", model = "claude-haiku-5-5" }
 debrief   = { provider = "claude", model = "claude-haiku-5-5" }
 builder   = { provider = "claude", model = "claude-sonnet-5-5" }
 explorer  = { provider = "claude", model = "claude-sonnet-5-5" }
