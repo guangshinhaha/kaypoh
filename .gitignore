@@ -1,3 +1,5 @@
 # shinfactory runtime state
 .noodle/
 .worktrees/
+node_modules/
+runs/
