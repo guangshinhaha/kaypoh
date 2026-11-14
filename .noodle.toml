@@ -1,0 +1,56 @@
+mode = "auto"
+
+[concurrency]
+max_concurrency = 5
+
+# Every stage runs on claude for now. Building and exploring are meant to run
+# on zcode (Z.ai's GLM-5.3), so the agent that writes the code is a different
+# provider from the one that reviews it, but headless zcode cannot pick a
+# model yet: guangshinhaha/shinfactory#190. Switch back once that lands.
+[routing.defaults]
+provider = "claude"
+model = "claude-sonnet-5-5"
+
+[routing.roles]
+scheduler = { provider = "claude", model = "claude-sonnet-5-5" }
+debrief   = { provider = "claude", model = "claude-haiku-5-5" }
+builder   = { provider = "claude", model = "claude-sonnet-5-5" }
+explorer  = { provider = "claude", model = "claude-sonnet-5-5" }
+reviewer  = { provider = "claude", model = "claude-sonnet-5-5" }
+adversary = { provider = "claude", model = "claude-sonnet-5-5" }
+planner   = { provider = "claude", model = "claude-opus-5-5" }
+verifier  = { provider = "claude", model = "claude-opus-5-5" }
+
+[skills]
+paths = [".agents/skills"]
+
+[adapters.backlog]
+skill = "backlog"
+
+[adapters.backlog.scripts]
+sync = "adapters/backlog-sync"
+add = "adapters/backlog-add"
+done = "adapters/backlog-done"
+edit = "adapters/backlog-edit"
+stop = "adapters/backlog-stop"
+stopped = "adapters/backlog-stopped"
+
+[landing]
+mode = "pr"
+close_issues = true
+
+# zcode only runs through the orca runtime (Orca starts the agent itself);
+# claude also runs there so every stage lands in the same Orca run/worktree
+# flow and shows up in the Orca UI.
+[runtime]
+default = "orca"
+
+[runtime.orca]
+
+# zcode stages run here; keep this at least max_concurrency or a planned zcode
+# launch fails with "concurrency limit reached" and its order is marked failed.
+[runtime.process]
+max_concurrent = 5
+
+[server]
+port = 3003
