@@ -3,7 +3,7 @@ import path from "node:path";
 import { chromium, type Page } from "playwright";
 import { Budget, costUsd, type Pricing } from "./budget.js";
 import { assertRunnable, isLocalUrl, withSiteLock } from "./guard.js";
-import type { ComputerUseModel } from "./model.js";
+import type { ComputerUseModel, PageElement } from "./model.js";
 import { TraceEvent, type Action } from "./schema.js";
 
 export type RunStatus =
@@ -81,10 +81,19 @@ async function perform(page: Page, a: Action): Promise<void> {
       else await page.locator(need(a)).first().click({ timeout });
       break;
     case "type":
-      await page.locator(need(a)).first().fill(a.value ?? "", { timeout });
+      // Coordinates: click the field, then type like a person. No target: type into the focused field.
+      if (xy) {
+        await page.mouse.click(Number(xy[1]), Number(xy[2]));
+        await page.keyboard.press("ControlOrMeta+a");
+        await page.keyboard.type(a.value ?? "");
+      } else if (a.target) await page.locator(a.target).first().fill(a.value ?? "", { timeout });
+      else await page.keyboard.type(a.value ?? "");
       break;
     case "select":
-      await page.locator(need(a)).first().selectOption(a.value ?? "", { timeout });
+      if (xy) {
+        const h = await page.evaluateHandle(([x, y]) => document.elementFromPoint(x!, y!), [Number(xy[1]), Number(xy[2])] as [number, number]);
+        await h.asElement()?.selectOption(a.value ?? "", { timeout });
+      } else await page.locator(need(a)).first().selectOption(a.value ?? "", { timeout });
       break;
     case "back":
       await page.goBack({ timeout: 10_000 });
@@ -96,6 +105,20 @@ async function perform(page: Page, a: Action): Promise<void> {
       throw new Error(`action ${a.type} is not executable`);
   }
   await page.waitForLoadState("domcontentloaded");
+}
+
+async function listElements(page: Page): Promise<PageElement[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll("a, button, input, select, textarea, [role=button]")]
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        const forLabel = el.id && document.querySelector(`label[for="${el.id}"]`)?.textContent;
+        const label = (forLabel || el.getAttribute("aria-label") || (el as HTMLInputElement).placeholder || el.textContent || (el as HTMLInputElement).name || "").trim().slice(0, 80);
+        return { tag: el.tagName.toLowerCase(), label, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), w: r.width, h: r.height };
+      })
+      .filter((e) => e.w > 0 && e.h > 0 && e.x >= 0 && e.y >= 0)
+      .map(({ tag, label, x, y }) => ({ tag, label, x, y })),
+  );
 }
 
 function need(a: Action): string {
@@ -147,10 +170,18 @@ async function execute(opts: RunOptions): Promise<RunResult> {
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ viewport: opts.viewport ?? { width: 390, height: 844 } });
-    if (!opts.liveApproved) {
+    // Network-layer submit guard: any writing request (non-GET/HEAD) is aborted and ends the run,
+    // whatever UI pattern fired it (form post, fetch from a button handler, onchange submit).
+    let blockedWrite: string | null = null;
+    await context.route("**/*", (route) => {
+      const req = route.request();
+      if (req.method() !== "GET" && req.method() !== "HEAD") {
+        blockedWrite ??= `${req.method()} ${req.url()}`;
+        return route.abort();
+      }
       // Local-only runs must not reach any other host.
-      await context.route("**/*", (route) => (isLocalUrl(route.request().url()) ? route.continue() : route.abort()));
-    }
+      return !opts.liveApproved && !isLocalUrl(req.url()) ? route.abort() : route.continue();
+    });
     const page = await context.newPage();
     let docStatus = 200;
     page.on("response", (r) => {
@@ -180,7 +211,7 @@ async function execute(opts: RunOptions): Promise<RunResult> {
           return await finish("blocked", block);
         }
 
-        const d = await opts.model.decide({ goal: opts.goal, step, url: lastUrl, screenshotPng: png, history });
+        const d = await opts.model.decide({ goal: opts.goal, step, url: lastUrl, screenshotPng: png, elements: await listElements(page), history });
         const cost = costUsd(d.usage, opts.pricing);
         runSpent += cost;
         opts.flowBudget.add(cost);
@@ -222,6 +253,11 @@ async function execute(opts: RunOptions): Promise<RunResult> {
         await write({ ...base, action: d.action });
         await sleep(pace.minMs + Math.random() * (pace.maxMs - pace.minMs));
         await perform(page, d.action);
+        await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => undefined);
+        if (blockedWrite) {
+          lastUrl = page.url();
+          return await finish("stopped_before_submit", `submit_blocked: write request aborted (${blockedWrite})`);
+        }
       }
       return await finish("max_steps", `reached max steps (${maxSteps})`);
     } catch (err) {

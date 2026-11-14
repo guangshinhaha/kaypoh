@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Budget } from "../src/budget.js";
-import type { ComputerUseModel, StepDecision } from "../src/model.js";
+import type { ComputerUseModel, StepDecision, StepInput } from "../src/model.js";
 import { runOnce, type RunOptions } from "../src/runner.js";
 import { TraceEvent, type Action } from "../src/schema.js";
 import { startSite } from "./site.js";
@@ -69,6 +69,57 @@ describe("one run on the local flow", () => {
   it("treats an explicit submit action as a stop too", async () => {
     const r = await runOnce(await opts({ model: script([{ type: "submit" }]) }));
     expect(r.status).toBe("stopped_before_submit");
+  });
+});
+
+/** A model that sees only the screenshot-era inputs a real one gets: coordinates from the controls list, never CSS ids. */
+const bySight = (plan: Array<[label: RegExp, make: (x: number, y: number) => Action]>): ComputerUseModel => {
+  let i = 0;
+  return {
+    async decide(input: StepInput) {
+      const [label, make] = plan[Math.min(i++, plan.length - 1)]!;
+      const el = input.elements.find((e) => label.test(e.label));
+      if (!el) throw new Error(`no control matching ${label} in ${JSON.stringify(input.elements)}`);
+      return { expectation: "e", observation: "o", action: make(el.x, el.y), usage: { in: 1000, out: 100 } };
+    },
+  };
+};
+
+describe("a model that only sees coordinates can finish the flow", () => {
+  it("clicks, types, selects and reaches the submit stop without any CSS selector", async () => {
+    const r = await runOnce(
+      await opts({
+        model: bySight([
+          [/Check eligibility/, (x, y) => ({ type: "click", target: `${x},${y}` })],
+          [/income/i, (x, y) => ({ type: "type", target: `${x},${y}`, value: "3200" })],
+          [/household/i, (x, y) => ({ type: "select", target: `${x},${y}`, value: "2" })],
+          [/^Check$/, (x, y) => ({ type: "click", target: `${x},${y}` })],
+        ]),
+      }),
+    );
+    expect(r.status).toBe("stopped_before_submit");
+    expect(site.posts).toEqual([]);
+  });
+
+  it("types into the focused field when the action has no target", async () => {
+    const o = await opts({
+      startUrl: `${site.url}/form.html`,
+      model: script([{ type: "click", target: "#income" }, { type: "type", value: "4100" }, { type: "stop" }]),
+    });
+    expect((await runOnce(o)).status).toBe("completed");
+  });
+});
+
+describe("network-layer submit guard", () => {
+  it.each([
+    ["select onchange form.submit()", "select-submit.html", { type: "select", target: "#s", value: "a" }],
+    ["button fetch POST", "spa-submit.html", { type: "click", target: "#go" }],
+  ] as const)("stops a %s before it reaches the server", async (_n, page, action) => {
+    site.posts.length = 0;
+    const r = await runOnce(await opts({ startUrl: `${site.url}/${page}`, model: script([action, { type: "stop" }]) }));
+    expect(r.status).toBe("stopped_before_submit");
+    expect(site.posts).toEqual([]);
+    expect((await readTrace(r.tracePath)).at(-1)?.reason).toMatch(/submit_blocked: write request aborted/);
   });
 });
 

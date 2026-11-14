@@ -1,11 +1,20 @@
 import type { Action } from "./schema.js";
 import type { TraceEvent } from "./schema.js";
 
+export interface PageElement {
+  tag: string;
+  label: string;
+  x: number;
+  y: number;
+}
+
 export interface StepInput {
   goal: string;
   step: number;
   url: string;
   screenshotPng: Buffer;
+  /** Visible controls with their centre in viewport pixels, so a model can click and type by coordinates. */
+  elements: readonly PageElement[];
   history: readonly TraceEvent[];
 }
 

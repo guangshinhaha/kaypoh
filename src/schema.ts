@@ -5,7 +5,7 @@ export const ActionType = z.enum(["click", "type", "select", "back", "scroll", "
 
 export const Action = z.object({
   type: ActionType,
-  /** CSS selector, or "x,y" viewport coordinates for a click. */
+  /** "x,y" viewport coordinates (all a screenshot-only model has) or a CSS selector. */
   target: z.string().optional(),
   value: z.string().optional(),
 });

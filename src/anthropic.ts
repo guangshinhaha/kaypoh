@@ -22,7 +22,7 @@ const TOOL = {
         type: "object",
         properties: {
           type: { type: "string", enum: ["click", "type", "select", "back", "scroll", "submit", "stop"] },
-          target: { type: "string", description: "CSS selector, or 'x,y' viewport coordinates for a click." },
+          target: { type: "string", description: "'x,y' viewport pixel coordinates of the control (use the visible-controls list). For 'type', clicks then types at x,y; omit target to type into the focused field." },
           value: { type: "string" },
         },
         required: ["type"],
@@ -47,6 +47,7 @@ export function anthropicModel(opts: AnthropicModelOptions): ComputerUseModel {
         .slice(-5)
         .map((e) => `step ${e.step}: expected "${e.expectation}", did ${JSON.stringify(e.action)}`)
         .join("\n");
+      const controls = input.elements.map((e) => `- ${e.tag} "${e.label}" at ${e.x},${e.y}`).join("\n");
       const res = await opts.client.messages.create({
         model: opts.model ?? "claude-sonnet-5-5",
         max_tokens: opts.maxTokens ?? 1024,
@@ -58,7 +59,7 @@ export function anthropicModel(opts: AnthropicModelOptions): ComputerUseModel {
             role: "user",
             content: [
               { type: "image", source: { type: "base64", media_type: "image/png", data: input.screenshotPng.toString("base64") } },
-              { type: "text", text: `Task: ${input.goal}\nStep ${input.step}. Page: ${input.url}\n${recent ? `Recent steps:\n${recent}` : "No steps yet."}` },
+              { type: "text", text: `Task: ${input.goal}\nStep ${input.step}. Page: ${input.url}\n${recent ? `Recent steps:\n${recent}` : "No steps yet."}\nVisible controls:\n${controls || "(none)"}` },
             ],
           },
         ],
