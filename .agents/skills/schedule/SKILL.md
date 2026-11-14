@@ -26,8 +26,9 @@ Before scheduling an issue:
 - **Order.** Prefer the lowest key number first (C1 before C2). Run them one at a time: at most
   one `code` issue may have an order at a time, since each builds on the last.
 - **#1 itself** is the R1 parent, not a build issue. Never schedule it.
-- **Live runs.** C1 onwards drives a real browser against government sites. Never schedule it
-  unless N1 (site terms and access policy) is closed.
+- **Live runs.** Building and testing the runner uses fixtures, recorded traces or a local test
+  page only. Never schedule an order that runs the agent against a real government site. A live
+  run needs N1 (site terms of use) closed and a person's say-so.
 - **One GitHub call for issue states.** Fetch every issue's state once:
   `gh issue list --state all --limit 300 --json number,title,state,labels`. Don't run
   `gh issue view` per issue: dozens of calls in a few seconds trip GitHub's secondary rate
